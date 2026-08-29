@@ -32,6 +32,26 @@ BIT_DEPTH_CODES = {
 BOUNDS_ENTIRE_PROJECT = 1
 BOUNDS_TIME_SELECTION = 2
 
+DEFAULT_SAMPLE_RATE = 48000
+
+
+def _resolve_sample_rate(project, sample_rate: int) -> int:
+    """
+    Resolve a sample_rate argument of 0 to the project's actual rate.
+
+    Rendering at a rate that doesn't match the project forces REAPER to
+    resample every track before summing — and on at least some REAPER
+    builds, summing multiple simultaneously-resampled tracks during an
+    offline render silently produces total silence (each track alone
+    renders fine; 2+ together doesn't, even after restarting REAPER).
+    Defaulting to the project's own rate avoids the resample-and-sum path
+    entirely for the common case.
+    """
+    if sample_rate:
+        return sample_rate
+    rate = RPR.GetSetProjectInfo(project.id, "PROJECT_SRATE", 0, False)
+    return int(rate) if rate else DEFAULT_SAMPLE_RATE
+
 
 def _set_render_settings(
     output_path: str,
@@ -68,12 +88,16 @@ def _set_render_settings(
     return os.path.join(directory, f"{pattern}.{fmt}")
 
 
-def render_to_temp_file(sample_rate: int = 48000) -> str:
+def render_to_temp_file(sample_rate: int = 0) -> str:
     """
     Render the current project to a temporary WAV file and return its path.
     Used by analysis and mastering tools. Caller is responsible for deleting the file.
+    sample_rate: 0 (default) renders at the project's own sample rate; see
+    _resolve_sample_rate for why that matters.
     """
     import tempfile
+    project = get_project()
+    sample_rate = _resolve_sample_rate(project, sample_rate)
     tmp = tempfile.mktemp(suffix=".wav")
     real_path = _set_render_settings(tmp, "wav", sample_rate, 24, 2, bounds=BOUNDS_ENTIRE_PROJECT)
     RPR.Main_OnCommand(41824, 0)
@@ -86,20 +110,24 @@ def register_tools(mcp):
     def render_project(
         output_path: str,
         format: str = "wav",
-        sample_rate: int = 48000,
+        sample_rate: int = 0,
         bit_depth: int = 24,
         channels: int = 2,
     ) -> dict:
         """
         Render the entire project to a file.
         format: wav, flac, mp3 (requires LAME), ogg.
-        sample_rate: e.g. 44100, 48000, 96000.
+        sample_rate: e.g. 44100, 48000, 96000. 0 (default) uses the project's
+        own sample rate — recommended, since rendering at a mismatched rate
+        can trigger silent output on projects with mixed-rate source audio.
         bit_depth: 16, 24, or 32 (WAV only; ignored for mp3/ogg/flac).
         channels: 1 (mono) or 2 (stereo).
         """
         try:
             output_path = str(Path(output_path).expanduser().resolve())
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            project = get_project()
+            sample_rate = _resolve_sample_rate(project, sample_rate)
             output_path = _set_render_settings(
                 output_path, format, sample_rate, bit_depth, channels, bounds=BOUNDS_ENTIRE_PROJECT
             )
@@ -125,16 +153,20 @@ def register_tools(mcp):
         start: float,
         end: float,
         format: str = "wav",
-        sample_rate: int = 48000,
+        sample_rate: int = 0,
         bit_depth: int = 24,
         channels: int = 2,
     ) -> dict:
-        """Render a specific time range of the project to a file."""
+        """
+        Render a specific time range of the project to a file.
+        sample_rate: 0 (default) uses the project's own sample rate.
+        """
         try:
             output_path = str(Path(output_path).expanduser().resolve())
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             project = get_project()
             project.time_selection = (start, end)
+            sample_rate = _resolve_sample_rate(project, sample_rate)
             output_path = _set_render_settings(
                 output_path, format, sample_rate, bit_depth, channels, bounds=BOUNDS_TIME_SELECTION
             )
@@ -157,18 +189,20 @@ def register_tools(mcp):
         output_directory: str,
         track_indices: list = None,
         format: str = "wav",
-        sample_rate: int = 48000,
+        sample_rate: int = 0,
         bit_depth: int = 24,
     ) -> dict:
         """
         Render each track as a separate stem file by soloing each track individually.
         track_indices: list of track indices, or null to render all tracks.
         Files are named after the track names in the output directory.
+        sample_rate: 0 (default) uses the project's own sample rate.
         """
         try:
             output_directory = str(Path(output_directory).expanduser().resolve())
             os.makedirs(output_directory, exist_ok=True)
             project = get_project()
+            sample_rate = _resolve_sample_rate(project, sample_rate)
             indices = track_indices if track_indices is not None else list(range(project.n_tracks))
             rendered = []
 
