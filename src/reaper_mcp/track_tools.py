@@ -4,6 +4,14 @@ import reapy
 from reapy import reascript_api as RPR
 
 from reaper_mcp.connection import get_project
+from reaper_mcp.track_utils import (
+    get_item_name,
+    get_pan,
+    get_volume_db,
+    set_mute,
+    set_solo,
+    set_volume_db,
+)
 
 logger = logging.getLogger("reaper_mcp.track_tools")
 
@@ -65,8 +73,8 @@ def register_tools(mcp):
         try:
             project = get_project()
             track = project.tracks[track_index]
-            track.volume = volume_db
-            return {"success": True, "track_index": track_index, "volume_db": track.volume}
+            set_volume_db(track, volume_db)
+            return {"success": True, "track_index": track_index, "volume_db": get_volume_db(track)}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -76,8 +84,8 @@ def register_tools(mcp):
         try:
             project = get_project()
             track = project.tracks[track_index]
-            track.pan = pan
-            return {"success": True, "track_index": track_index, "pan": track.pan}
+            track.set_info_value("D_PAN", pan)
+            return {"success": True, "track_index": track_index, "pan": get_pan(track)}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -87,8 +95,8 @@ def register_tools(mcp):
         try:
             project = get_project()
             track = project.tracks[track_index]
-            track.mute = muted
-            return {"success": True, "track_index": track_index, "muted": track.mute}
+            set_mute(track, muted)
+            return {"success": True, "track_index": track_index, "muted": track.is_muted}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -98,8 +106,8 @@ def register_tools(mcp):
         try:
             project = get_project()
             track = project.tracks[track_index]
-            track.solo = soloed
-            return {"success": True, "track_index": track_index, "soloed": track.solo}
+            set_solo(track, soloed)
+            return {"success": True, "track_index": track_index, "soloed": track.is_solo}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -122,17 +130,17 @@ def register_tools(mcp):
                     "index": i,
                     "position": item.position,
                     "length": item.length,
-                    "name": item.name,
+                    "name": get_item_name(item),
                 })
 
             return {
                 "success": True,
                 "track_index": track_index,
                 "name": track.name,
-                "volume_db": track.volume,
-                "pan": track.pan,
-                "muted": track.mute,
-                "soloed": track.solo,
+                "volume_db": get_volume_db(track),
+                "pan": get_pan(track),
+                "muted": track.is_muted,
+                "soloed": track.is_solo,
                 "fx_count": track.n_fxs,
                 "fx": fx_list,
                 "item_count": track.n_items,
@@ -152,10 +160,10 @@ def register_tools(mcp):
                 tracks.append({
                     "index": i,
                     "name": track.name,
-                    "volume_db": track.volume,
-                    "pan": track.pan,
-                    "muted": track.mute,
-                    "soloed": track.solo,
+                    "volume_db": get_volume_db(track),
+                    "pan": get_pan(track),
+                    "muted": track.is_muted,
+                    "soloed": track.is_solo,
                     "fx_count": track.n_fxs,
                     "item_count": track.n_items,
                 })

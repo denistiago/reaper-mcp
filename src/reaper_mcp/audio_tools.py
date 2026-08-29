@@ -49,7 +49,7 @@ def register_tools(mcp):
         try:
             project = get_project()
             track = project.tracks[track_index]
-            track.armed = True
+            track.set_info_value("I_RECARM", 1)
             RPR.Main_OnCommand(1013, 0)  # Transport: Record
             return {
                 "success": True,
@@ -118,10 +118,10 @@ def register_tools(mcp):
                 item.length -= end_trim
 
             if fade_in > 0:
-                item.fade_in_length = fade_in
+                item.set_info_value("D_FADEINLEN", fade_in)
 
             if fade_out > 0:
-                item.fade_out_length = fade_out
+                item.set_info_value("D_FADEOUTLEN", fade_out)
 
             return {
                 "success": True,
@@ -141,12 +141,12 @@ def register_tools(mcp):
             track = project.tracks[track_index]
             item = track.items[item_index]
             take = item.active_take
-            take.pitch = semitones
+            take.set_info_value("D_PITCH", semitones)
             return {
                 "success": True,
                 "track_index": track_index,
                 "item_index": item_index,
-                "pitch_semitones": take.pitch,
+                "pitch_semitones": take.get_info_value("D_PITCH"),
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -159,12 +159,12 @@ def register_tools(mcp):
             track = project.tracks[track_index]
             item = track.items[item_index]
             take = item.active_take
-            take.playback_rate = rate
+            take.set_info_value("D_PLAYRATE", rate)
             return {
                 "success": True,
                 "track_index": track_index,
                 "item_index": item_index,
-                "playback_rate": take.playback_rate,
+                "playback_rate": take.get_info_value("D_PLAYRATE"),
             }
         except Exception as e:
             return {"success": False, "error": str(e)}

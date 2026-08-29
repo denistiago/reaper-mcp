@@ -10,6 +10,23 @@ from reaper_mcp.connection import get_project
 
 logger = logging.getLogger("reaper_mcp.project_tools")
 
+# reapy's Project.time_signature getter actually returns (bpm, bpi) — not
+# (numerator, denominator) — and has no setter at all (assigning to it just
+# shadows the property instance-side, silently doing nothing to REAPER).
+# The real numerator/denominator has to go through the tempo/time-sig-marker
+# API directly.
+
+
+def _get_time_signature(project) -> tuple:
+    _, _, num, denom, _ = RPR.TimeMap_GetTimeSigAtTime(project.id, 0.0, 0, 0, 0)
+    return int(num), int(denom)
+
+
+def _set_time_signature(project, numerator: int, denominator: int) -> None:
+    RPR.SetTempoTimeSigMarker(
+        project.id, -1, 0.0, -1, -1, project.bpm, numerator, denominator, False
+    )
+
 
 def register_tools(mcp):
 
@@ -22,7 +39,7 @@ def register_tools(mcp):
             project.bpm = tempo
             if time_signature:
                 num, denom = map(int, time_signature.split("/"))
-                project.time_signature = (num, denom)
+                _set_time_signature(project, num, denom)
             return {
                 "success": True,
                 "name": name or f"New Project {time.strftime('%Y-%m-%d %H-%M-%S')}",
@@ -58,11 +75,12 @@ def register_tools(mcp):
                 return {"success": False, "error": f"File not found: {project_path}"}
             RPR.Main_openProject(project_path)
             project = get_project()
+            num, denom = _get_time_signature(project)
             return {
                 "success": True,
                 "name": project.name,
                 "tempo": project.bpm,
-                "time_signature": f"{project.time_signature[0]}/{project.time_signature[1]}",
+                "time_signature": f"{num}/{denom}",
                 "project_path": project_path,
             }
         except Exception as e:
@@ -90,12 +108,13 @@ def register_tools(mcp):
             except Exception:
                 pass
 
+            num, denom = _get_time_signature(project)
             return {
                 "success": True,
                 "name": project.name,
                 "path": project.path,
                 "tempo": project.bpm,
-                "time_signature": f"{project.time_signature[0]}/{project.time_signature[1]}",
+                "time_signature": f"{num}/{denom}",
                 "length": project.length,
                 "track_count": project.n_tracks,
                 "markers": markers,
@@ -120,7 +139,7 @@ def register_tools(mcp):
         """Set the project time signature, e.g. 4/4, 3/4, 6/8."""
         try:
             project = get_project()
-            project.time_signature = (numerator, denominator)
+            _set_time_signature(project, numerator, denominator)
             return {"success": True, "time_signature": f"{numerator}/{denominator}"}
         except Exception as e:
             return {"success": False, "error": str(e)}

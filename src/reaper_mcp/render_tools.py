@@ -6,6 +6,7 @@ import reapy
 from reapy import reascript_api as RPR
 
 from reaper_mcp.connection import get_project
+from reaper_mcp.track_utils import set_solo
 
 logger = logging.getLogger("reaper_mcp.render_tools")
 
@@ -24,6 +25,13 @@ BIT_DEPTH_CODES = {
     32: 4,
 }
 
+# REAPER RENDER_BOUNDSFLAG values (from the Render dialog's "Bounds" dropdown).
+# Note these do NOT start at 0=entire project as the names might suggest —
+# 0 is "custom time range" (silently renders nothing if RENDER_STARTPOS/
+# RENDER_ENDPOS aren't also set).
+BOUNDS_ENTIRE_PROJECT = 1
+BOUNDS_TIME_SELECTION = 2
+
 
 def _set_render_settings(
     output_path: str,
@@ -32,16 +40,32 @@ def _set_render_settings(
     bit_depth: int,
     channels: int,
     bounds: int,
-) -> None:
-    """Configure REAPER's render settings. bounds: 0=entire project, 1=time selection."""
-    fmt_code = FORMAT_CODES.get(format.lower(), 0)
+) -> str:
+    """
+    Configure REAPER's render settings and return the actual path REAPER will
+    write to.
+
+    RENDER_FILE is a DIRECTORY, not a full file path — REAPER derives the
+    filename from RENDER_PATTERN (project name by default) and always
+    appends its own extension for the chosen format. Passing a full file
+    path as RENDER_FILE makes REAPER treat it as a directory and silently
+    render under the project's name instead. So output_path is split here:
+    its directory becomes RENDER_FILE, and its extension-stripped basename
+    becomes RENDER_PATTERN (a literal name, not a wildcard).
+    """
+    fmt = format.lower()
+    fmt_code = FORMAT_CODES.get(fmt, 0)
     bdepth_code = BIT_DEPTH_CODES.get(bit_depth, 2)
-    RPR.GetSetProjectInfo_String(0, "RENDER_FILE", output_path, True)
+    directory = os.path.dirname(output_path)
+    pattern = os.path.splitext(os.path.basename(output_path))[0]
+    RPR.GetSetProjectInfo_String(0, "RENDER_FILE", directory, True)
+    RPR.GetSetProjectInfo_String(0, "RENDER_PATTERN", pattern, True)
     RPR.GetSetProjectInfo(0, "RENDER_FORMAT", fmt_code, True)
     RPR.GetSetProjectInfo(0, "RENDER_FORMAT2", bdepth_code, True)
     RPR.GetSetProjectInfo(0, "RENDER_SRATE", float(sample_rate), True)
     RPR.GetSetProjectInfo(0, "RENDER_CHANNELS", float(channels), True)
     RPR.GetSetProjectInfo(0, "RENDER_BOUNDSFLAG", float(bounds), True)
+    return os.path.join(directory, f"{pattern}.{fmt}")
 
 
 def render_to_temp_file(sample_rate: int = 48000) -> str:
@@ -51,9 +75,9 @@ def render_to_temp_file(sample_rate: int = 48000) -> str:
     """
     import tempfile
     tmp = tempfile.mktemp(suffix=".wav")
-    _set_render_settings(tmp, "wav", sample_rate, 24, 2, bounds=0)
+    real_path = _set_render_settings(tmp, "wav", sample_rate, 24, 2, bounds=BOUNDS_ENTIRE_PROJECT)
     RPR.Main_OnCommand(41824, 0)
-    return tmp
+    return real_path
 
 
 def register_tools(mcp):
@@ -76,7 +100,9 @@ def register_tools(mcp):
         try:
             output_path = str(Path(output_path).expanduser().resolve())
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            _set_render_settings(output_path, format, sample_rate, bit_depth, channels, bounds=0)
+            output_path = _set_render_settings(
+                output_path, format, sample_rate, bit_depth, channels, bounds=BOUNDS_ENTIRE_PROJECT
+            )
             RPR.Main_OnCommand(41824, 0)  # File: Render project to disk (no dialog)
             if not os.path.exists(output_path):
                 return {"success": False, "error": "Render command completed but output file not found"}
@@ -109,7 +135,9 @@ def register_tools(mcp):
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             project = get_project()
             project.time_selection = (start, end)
-            _set_render_settings(output_path, format, sample_rate, bit_depth, channels, bounds=1)
+            output_path = _set_render_settings(
+                output_path, format, sample_rate, bit_depth, channels, bounds=BOUNDS_TIME_SELECTION
+            )
             RPR.Main_OnCommand(41824, 0)
             if not os.path.exists(output_path):
                 return {"success": False, "error": "Render completed but output file not found"}
@@ -149,11 +177,13 @@ def register_tools(mcp):
                 track_name = track.name or f"Track_{idx}"
                 # Solo this track exclusively
                 for j in range(project.n_tracks):
-                    project.tracks[j].solo = (j == idx)
+                    set_solo(project.tracks[j], j == idx)
                 # Sanitize filename
                 safe_name = "".join(c if c.isalnum() or c in " _-" else "_" for c in track_name)
                 stem_path = os.path.join(output_directory, f"{safe_name}.{format}")
-                _set_render_settings(stem_path, format, sample_rate, bit_depth, 2, bounds=0)
+                stem_path = _set_render_settings(
+                    stem_path, format, sample_rate, bit_depth, 2, bounds=BOUNDS_ENTIRE_PROJECT
+                )
                 RPR.Main_OnCommand(41824, 0)
                 rendered.append({
                     "track_index": idx,
@@ -164,7 +194,7 @@ def register_tools(mcp):
 
             # Unsolo all tracks
             for j in range(project.n_tracks):
-                project.tracks[j].solo = False
+                set_solo(project.tracks[j], False)
 
             return {
                 "success": True,
@@ -176,7 +206,7 @@ def register_tools(mcp):
             try:
                 proj = get_project()
                 for j in range(proj.n_tracks):
-                    proj.tracks[j].solo = False
+                    set_solo(proj.tracks[j], False)
             except Exception:
                 pass
             logger.error(f"render_stems failed: {e}")

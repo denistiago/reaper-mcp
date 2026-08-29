@@ -5,6 +5,7 @@ import reapy
 from reapy import reascript_api as RPR
 
 from reaper_mcp.connection import get_project
+from reaper_mcp.track_utils import get_volume_db, set_volume_db
 
 logger = logging.getLogger("reaper_mcp.mastering_tools")
 
@@ -23,11 +24,11 @@ def register_tools(mcp):
         try:
             project = get_project()
             master = project.master_track
-            fx_index = master.add_fx(fx_name)
-            if fx_index < 0:
+            try:
+                fx = master.add_fx(fx_name)
+            except ValueError:
                 return {"success": False, "error": f"Plugin not found: '{fx_name}'"}
-            fx = master.fxs[fx_index]
-            return {"success": True, "fx_index": fx_index, "name": fx.name, "n_params": fx.n_params}
+            return {"success": True, "fx_index": fx.index, "name": fx.name, "n_params": fx.n_params}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -52,7 +53,9 @@ def register_tools(mcp):
             project = get_project()
             master = project.master_track
             fx = master.fxs[fx_index]
-            fx.params[param_index].normalized_value = value
+            # fx.params[i].normalized's setter is broken in python-reapy==0.10.0
+            # (references a nonexistent FX.id); set via the raw ReaScript call.
+            RPR.TrackFX_SetParamNormalized(master.id, fx_index, param_index, value)
             return {
                 "success": True,
                 "fx_index": fx_index,
@@ -69,8 +72,8 @@ def register_tools(mcp):
         try:
             project = get_project()
             master = project.master_track
-            master.volume = volume_db
-            return {"success": True, "volume_db": master.volume}
+            set_volume_db(master, volume_db)
+            return {"success": True, "volume_db": get_volume_db(master)}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -93,10 +96,11 @@ def register_tools(mcp):
             master = project.master_track
             added = []
             for fx_name in MASTERING_PRESETS[preset]:
-                fx_index = master.add_fx(fx_name)
-                if fx_index >= 0:
-                    fx = master.fxs[fx_index]
-                    added.append({"fx_index": fx_index, "name": fx.name})
+                try:
+                    fx = master.add_fx(fx_name)
+                    added.append({"fx_index": fx.index, "name": fx.name})
+                except ValueError:
+                    logger.warning(f"Skipping missing plugin in preset: {fx_name}")
             return {"success": True, "preset": preset, "fx_chain": added}
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -111,16 +115,16 @@ def register_tools(mcp):
         try:
             project = get_project()
             master = project.master_track
-            fx_index = master.add_fx("ReaLimit")
-            if fx_index < 0:
+            try:
+                fx = master.add_fx("ReaLimit")
+            except ValueError:
                 return {"success": False, "error": "ReaLimit not found — check REAPER installation"}
-            fx = master.fxs[fx_index]
             return {
                 "success": True,
-                "fx_index": fx_index,
+                "fx_index": fx.index,
                 "name": fx.name,
                 "hint": (
-                    f"ReaLimit added at index {fx_index}. "
+                    f"ReaLimit added at index {fx.index}. "
                     "Use get_fx_parameters to find threshold/release param indices, "
                     "then use set_master_fx_parameter to set them."
                 ),
@@ -187,8 +191,8 @@ def register_tools(mcp):
             gain_db = target_lufs - current_lufs
             project = get_project()
             master = project.master_track
-            new_vol_db = master.volume + gain_db
-            master.volume = new_vol_db
+            new_vol_db = get_volume_db(master) + gain_db
+            set_volume_db(master, new_vol_db)
 
             return {
                 "success": True,

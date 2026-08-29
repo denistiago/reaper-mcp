@@ -21,13 +21,13 @@ def register_tools(mcp):
         try:
             project = get_project()
             track = project.tracks[track_index]
-            fx_index = track.add_fx(fx_name)
-            if fx_index < 0:
+            try:
+                fx = track.add_fx(fx_name)
+            except ValueError:
                 return {"success": False, "error": f"Plugin not found: '{fx_name}'"}
-            fx = track.fxs[fx_index]
             return {
                 "success": True,
-                "fx_index": fx_index,
+                "fx_index": fx.index,
                 "name": fx.name,
                 "n_params": fx.n_params,
                 "track_index": track_index,
@@ -60,7 +60,9 @@ def register_tools(mcp):
             project = get_project()
             track = project.tracks[track_index]
             fx = track.fxs[fx_index]
-            fx.params[param_index].normalized_value = value
+            # fx.params[i].normalized's setter is broken in python-reapy==0.10.0
+            # (references a nonexistent FX.id); set via the raw ReaScript call.
+            RPR.TrackFX_SetParamNormalized(track.id, fx_index, param_index, value)
             param_name = fx.params[param_index].name
             return {
                 "success": True,
@@ -86,8 +88,8 @@ def register_tools(mcp):
                 params.append({
                     "index": i,
                     "name": param.name,
-                    "normalized_value": param.normalized_value,
-                    "formatted_value": param.formatted_value,
+                    "normalized_value": param.normalized,
+                    "formatted_value": param.formatted,
                 })
             return {
                 "success": True,
@@ -143,13 +145,13 @@ def register_tools(mcp):
             project = get_project()
             track = project.tracks[track_index]
             fx = track.fxs[fx_index]
-            fx.preset_name = preset_name
+            fx.preset = preset_name
             return {
                 "success": True,
                 "track_index": track_index,
                 "fx_index": fx_index,
                 "fx_name": fx.name,
-                "preset": fx.preset_name,
+                "preset": fx.preset,
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
